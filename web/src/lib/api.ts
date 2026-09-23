@@ -117,6 +117,26 @@ export type MinhaVenda = {
 export type ItemVenda = { variacao_id: string; quantidade: number };
 export type Pagamento = { forma: 'PIX' | 'DEBITO' | 'CREDITO' | 'DINHEIRO'; valor: number; parcelas?: number };
 
+export type VariacaoAdmin = VariacaoEstoque & { custo_medio: string; valor_em_estoque: string };
+
+export type Categoria = { id: string; nome: string };
+export type Colecao = { id: string; nome: string; estacao: string | null; ano: number | null };
+export type Fornecedor = { id: string; nome: string; whatsapp: string | null; obs: string | null };
+
+export type LinhaImportacao = {
+  referencia: string;
+  nome: string;
+  categoria?: string;
+  colecao?: string;
+  fornecedor?: string;
+  tamanho: string;
+  cor: string;
+  preco_venda: number;
+  codigo_barras?: string;
+  estoque_inicial?: number;
+};
+export type ResultadoImportacao = { linha: number; ok: boolean; erro: string | null };
+
 export const api = {
   login: (email: string, senha: string) =>
     request<{ token: string; perfil: Perfil }>('/auth/login', {
@@ -151,6 +171,67 @@ export const api = {
     request('/api/caixa/movimentar', { method: 'POST', body: JSON.stringify({ tipo, valor, motivo }) }),
   fecharCaixa: (valor_contado: number) =>
     request('/api/caixa/fechar', { method: 'POST', body: JSON.stringify({ valor_contado }) }),
+
+  // ── Admin ──────────────────────────────────────────────────────────────
+  estoqueAdmin: (q = '') =>
+    request<VariacaoAdmin[]>(`/api/views/v_estoque_admin?${new URLSearchParams({ q, limit: '100' })}`),
+
+  categorias: () => request<Categoria[]>('/api/cadastros/categorias'),
+  criarCategoria: (nome: string) =>
+    request<Categoria>('/api/cadastros/categorias', { method: 'POST', body: JSON.stringify({ nome }) }),
+  colecoes: () => request<Colecao[]>('/api/cadastros/colecoes'),
+  criarColecao: (nome: string, estacao?: string, ano?: number) =>
+    request<Colecao>('/api/cadastros/colecoes', { method: 'POST', body: JSON.stringify({ nome, estacao, ano }) }),
+  fornecedores: () => request<Fornecedor[]>('/api/cadastros/fornecedores'),
+  criarFornecedor: (nome: string, whatsapp?: string) =>
+    request<Fornecedor>('/api/cadastros/fornecedores', { method: 'POST', body: JSON.stringify({ nome, whatsapp }) }),
+
+  criarProduto: (payload: {
+    referencia: string;
+    nome: string;
+    categoria_id?: string | null;
+    colecao_id?: string | null;
+    fornecedor_id?: string | null;
+    preco_venda: number;
+    tamanhos: string[];
+    cores: string[];
+    foto_url?: string | null;
+  }) => request('/api/estoque/produtos', { method: 'POST', body: JSON.stringify(payload) }),
+
+  importarProdutos: (linhas: LinhaImportacao[]) =>
+    request<ResultadoImportacao[]>('/api/estoque/produtos/importar', {
+      method: 'POST',
+      body: JSON.stringify({ linhas }),
+    }),
+
+  registrarEntrada: (payload: {
+    fornecedor_id?: string | null;
+    itens: { variacao_id: string; quantidade: number; custo_unitario_nf: number }[];
+    frete?: number;
+    outras_despesas?: number;
+    doc_ref?: string | null;
+  }) => request('/api/estoque/entradas', { method: 'POST', body: JSON.stringify(payload) }),
+
+  ajustarEstoque: (variacao_id: string, nova_qtd_contada: number, motivo: string) =>
+    request('/api/estoque/ajustar', {
+      method: 'POST',
+      body: JSON.stringify({ variacao_id, nova_qtd_contada, motivo }),
+    }),
+
+  alterarPrecos: (variacao_id: string, preco_venda: number, preco_promocional?: number | null, promo_ate?: string | null) =>
+    request('/api/estoque/precos', {
+      method: 'POST',
+      body: JSON.stringify({ variacao_id, preco_venda, preco_promocional, promo_ate }),
+    }),
+
+  criarUsuaria: (payload: {
+    nome: string;
+    email: string;
+    senha: string;
+    papel: 'vendedora' | 'gerente' | 'admin';
+    comissao_pct?: number;
+    limite_desconto_pct?: number | null;
+  }) => request<Perfil>('/api/usuarias', { method: 'POST', body: JSON.stringify(payload) }),
 };
 
 export { ApiError };

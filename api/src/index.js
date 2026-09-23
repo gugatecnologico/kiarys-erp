@@ -6,6 +6,7 @@ import { caixaRouter } from './routes/caixa.js';
 import { vendasRouter } from './routes/vendas.js';
 import { estoqueRouter } from './routes/estoque.js';
 import { usuariasRouter } from './routes/usuarias.js';
+import { cadastrosRouter } from './routes/cadastros.js';
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use('/api/caixa', caixaRouter);
 app.use('/api/vendas', vendasRouter);
 app.use('/api/estoque', estoqueRouter);
 app.use('/api/usuarias', usuariasRouter);
+app.use('/api/cadastros', cadastrosRouter);
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
