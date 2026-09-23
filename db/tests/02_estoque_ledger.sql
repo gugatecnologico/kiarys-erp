@@ -42,7 +42,7 @@ select is(
 );
 
 -- Saldo nunca é digitado: não existe UPDATE direto liberado em
--- estoque_saldos, nem para admin (sem grant nenhum para authenticated).
+-- estoque_saldos, nem para admin (sem grant nenhum pra kiarys_app).
 select tests.autenticar_como('11111111-1111-1111-1111-111111111111'); -- admin
 select throws_ok(
   $$ update kiarys.estoque_saldos set qtd = 999 where variacao_id = 'bbbbbbbb-0000-0000-0000-000000000001' $$,

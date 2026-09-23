@@ -5,14 +5,17 @@
 begin;
 select plan(3);
 
-select tests.autenticar_como('11111111-1111-1111-1111-111111111111'); -- admin
-
--- Variação nova, saldo 0, custo_medio 0 — entrada de 10 unidades a
--- R$50 com R$100 de frete (tudo num item só, então 100% do frete vai
--- pra ela): custo real = 50 + 100/10 = 60.
+-- Fixture criada ANTES de trocar pra kiarys_app: produtos/variacoes não
+-- têm nenhum grant direto (só por RPC/view — ver 0014), então um INSERT
+-- solto nelas só funciona rodando como o dono do banco.
 insert into kiarys.produtos (id, referencia, nome) values ('aaaaaaaa-0000-0000-0000-000000000002', 'REFTEST02', 'Produto Teste 2');
 insert into kiarys.variacoes (id, produto_id, tamanho, cor, preco_venda)
 values ('bbbbbbbb-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000002', 'M', 'Preto', 150.00);
+
+select tests.autenticar_como('11111111-1111-1111-1111-111111111111'); -- admin
+
+-- Entrada de 10 unidades a R$50 com R$100 de frete (tudo num item só,
+-- então 100% do frete vai pra ela): custo real = 50 + 100/10 = 60.
 
 select lives_ok(
   $$ select kiarys.registrar_entrada(
@@ -24,7 +27,7 @@ select lives_ok(
 );
 
 select is(
-  (select custo_medio from kiarys.variacoes where id = 'bbbbbbbb-0000-0000-0000-000000000002'),
+  (select custo_medio from public.v_estoque_admin where variacao_id = 'bbbbbbbb-0000-0000-0000-000000000002'),
   60.00,
   'custo médio = custo NF (50) + frete rateado (100/10 = 10)'
 );

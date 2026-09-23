@@ -1,31 +1,31 @@
 -- 0001_base.sql
 -- Schema `kiarys` (dados) + `public` (a fachada), extensões e funções de apoio.
 --
--- Arquitetura de acesso, em duas camadas independentes:
--- 1. `kiarys` PRECISA estar entre os "Exposed schemas" do Supabase
---    (Settings > API — é config de projeto, não SQL, documentada no
---    README) para que o PostgREST encontre as RPCs (`supabase.rpc(...)`
---    resolve o nome de função dentro dos schemas expostos). Se só
---    `public` estivesse exposto, toda chamada a `registrar_venda` etc.
---    devolveria 404 antes mesmo de checar permissão.
--- 2. Expor o schema não é o mesmo que liberá-lo: todo GRANT em toda
---    tabela de `kiarys` para `anon`/`authenticated` é revogado em
---    0014_permissoes.sql, e RLS fica ligado sem nenhuma policy (default
---    deny). Então `/rest/v1/venda_itens` 401/403 mesmo com o schema
---    exposto — só as ~15 RPCs recebem EXECUTE explícito. `public` guarda
---    as views de leitura (mais simples para o frontend do que decorar
---    nome de função para cada consulta).
--- Isso garante o que o brief pede na seção 2 ("Quem faz o quê é garantido
--- no banco, e não só na interface"): mesmo chamando a API direto, sem
--- passar pelas views/RPCs, não há GRANT que libere leitura ou escrita.
-
+-- Arquitetura de acesso (Postgres do Railway, sem Supabase): o navegador
+-- nunca fala com o Postgres direto — só a API Node do repositório
+-- (`api/`, serviço próprio no Railway) tem a connection string. Isso
+-- move a fronteira de confiança pra dentro da API. Mesmo assim, a regra
+-- do brief (seção 2: "Quem faz o quê é garantido no banco, e não só na
+-- interface") continua valendo por dois motivos:
+-- 1. A API sempre se conecta com UM ÚNICO role de banco (`kiarys_app`,
+--    criado em 0014_permissoes.sql) — não existe um role "admin" e outro
+--    "vendedora" no Postgres. Quem diferencia é RLS lendo `kiarys.uid()`,
+--    que a API seta por requisição (`select set_config('app.uid', ...)`)
+--    depois de validar o JWT — exatamente o mesmo mecanismo que o
+--    Supabase faria com `auth.uid()`, só que a verificação do JWT agora
+--    é código Node (`api/lib/auth.js`), não um serviço GoTrue separado.
+-- 2. Isso é defesa em profundidade, não só estética: um bug de rota na
+--    API (esqueceu de filtrar `WHERE vendedora_id = ...`) ainda esbarra
+--    em RLS. Um SQL solto por engano em alguma rota ainda esbarra nos
+--    GRANT revogados de `kiarys_app` nas tabelas sensíveis (0014).
 create schema if not exists kiarys;
 
 -- Trigram para busca por nome/referência "instantânea mesmo com milhares de
 -- variações" (seção 8, Performance) e unaccent para busca sem acento.
 create extension if not exists pg_trgm;
 create extension if not exists unaccent;
-create extension if not exists pgcrypto; -- gen_random_uuid()
+create extension if not exists pgcrypto; -- gen_random_uuid() + crypt()/gen_salt() do hash de senha
+create extension if not exists citext;   -- email case-insensitive (perfis.email, 0002)
 
 set search_path = kiarys, public;
 
@@ -77,6 +77,19 @@ language sql
 stable
 as $$ select (ts at time zone kiarys.tz())::date $$;
 
+-- Identidade da requisição atual. Substitui o `auth.uid()` do Supabase:
+-- a API Node seta `app.uid` como GUC LOCAL da transação
+-- (`select set_config('app.uid', p_perfil_id::text, true)`) logo depois
+-- de validar o JWT e antes de rodar qualquer RPC/consulta — mesma técnica
+-- de sempre (era assim que os testes de concorrência já simulavam sessão),
+-- só que agora é a API quem seta, não mais o PostgREST a partir do JWT
+-- do navegador.
+create or replace function kiarys.uid()
+returns uuid
+language sql
+stable
+as $$ select nullif(current_setting('app.uid', true), '')::uuid $$;
+
 -- perfil_atual() / eh_admin() / eh_gerente_ou_admin() / pode_ver_custo() /
 -- pode_cadastrar() moram em 0002_perfis_config.sql, não aqui: todas
 -- retornam ou leem `kiarys.perfis` (e as duas últimas, `kiarys.configuracoes`),
@@ -86,5 +99,5 @@ as $$ select (ts at time zone kiarys.tz())::date $$;
 -- funções aqui quebra a aplicação das migrations em ordem.
 
 comment on schema kiarys is
-  'Schema de dados do Kiarys ERP. Não exposto pela API do Supabase — só '
-  'public (views + RPCs) fala com o cliente. Ver README seção "Arquitetura".';
+  'Schema de dados do Kiarys ERP, no Postgres do Railway. Só a API Node '
+  'do repositório fala com ele — ver README seção "Arquitetura".';

@@ -5,5 +5,4 @@ dist/
 web/.env
 .DS_Store
 *.sql.gz
-supabase/.branches
-supabase/.temp
+api/.env

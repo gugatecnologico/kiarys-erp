@@ -1,0 +1,13 @@
+{
+  "name": "kiarys-erp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "db:migrate": "node scripts/migrate.js",
+    "db:migrate:seed": "node scripts/migrate.js --seed",
+    "db:test": "bash scripts/test-db.sh"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}

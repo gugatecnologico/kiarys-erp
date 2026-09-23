@@ -1,122 +1,170 @@
 # Kiarys ERP
 
 Sistema de vendas e estoque da Kiarys Moda Feminina (Juazeiro do Norte, CE).
-Projeto separado da Alyra Joias — outro repo, outro banco, outras contas.
-Brief completo: `KIARYS_ERP_BRIEF.md` (histórico da conversa que originou
-este repositório).
+Projeto separado da Alyra Joias — outro repo, outro banco, outras contas
+(mesmo Railway, mas serviços próprios). Brief completo:
+`KIARYS_ERP_BRIEF.md` (histórico da conversa que originou este repositório).
 
 ## Arquitetura
 
-- **Banco + Auth:** [Supabase](https://supabase.com) (plano Free).
-- **Frontend:** Vite + React + TypeScript, PWA, hospedado no
-  [Cloudflare Pages](https://pages.cloudflare.com) (plano Free).
-- **Sem backend próprio.** Toda regra crítica (venda, cancelamento,
-  entrada, caixa) é uma função Postgres `SECURITY DEFINER`, chamada
-  direto pelo cliente Supabase via RPC.
-- **Domínio:** subdomínio de `kiarabijous.com.br` (domínio antigo da Alyra,
-  hoje sem uso — ver "Domínio" abaixo), CNAME para o Cloudflare Pages.
+- **Banco:** Postgres, como serviço no Railway (mesmo projeto/organização
+  do resto do GVA, plano Pro já em uso).
+- **API:** serviço Node/Express próprio (`api/`), também no Railway —
+  mesma stack que o resto do GVA já usa (`kiara_instagram.js` etc). É
+  quem fala com o navegador; o Postgres nunca é exposto direto.
+- **Frontend:** Vite + React + TypeScript, PWA — servido como site
+  estático pelo próprio Railway (ou por trás da mesma API).
+- **Sem Supabase.** Toda regra crítica (venda, cancelamento, entrada,
+  caixa, login) é função Postgres `SECURITY DEFINER`, chamada pela API
+  via `pg` — nunca direto do navegador.
+- **Domínio:** subdomínio de `kiarabijous.com.br` (domínio antigo da
+  Alyra, hoje sem uso — ver "Domínio" abaixo), configurado como Custom
+  Domain do serviço no Railway.
+
+### Autenticação, sem Supabase Auth
+
+Não existe mais um serviço de Auth separado — `kiarys.perfis` é ao mesmo
+tempo identidade (email + `senha_hash`, bcrypt via `pgcrypto`) e perfil de
+negócio (papel, comissão, limite de desconto). O fluxo:
+
+1. Navegador manda email+senha pra `POST /auth/login` na API.
+2. A API chama `select kiarys.autenticar($1, $2)` (a única função que
+   ainda não exige sessão) e, se bater, **emite ela mesma** um JWT
+   assinado (`jsonwebtoken`, secret em variável de ambiente) — o banco
+   não sabe o que é um JWT, só devolve o perfil.
+3. Toda requisição seguinte manda esse JWT; um middleware da API valida
+   assinatura+validade, extrai o `id` do perfil, e — antes de rodar
+   qualquer RPC/consulta — seta `select set_config('app.uid', $1, true)`
+   **na mesma transação**. É esse `app.uid` que `kiarys.uid()`
+   (`db/migrations/0001_base.sql`) lê, e é o que RLS usa pra filtrar.
 
 ### Acesso ao banco, em duas camadas
 
-1. `kiarys` (onde moram as tabelas) precisa estar em **Settings > API >
-   Exposed schemas** do projeto Supabase, ao lado de `public` — senão o
-   PostgREST não resolve as RPCs (`supabase.rpc('registrar_venda', …)`
-   dá 404 antes de checar qualquer permissão).
-2. Expor o schema **não** libera acesso: toda tabela de `kiarys` tem RLS
-   ligado sem nenhuma policy de escrita e teve os `GRANT` padrão
-   revogados de `anon`/`authenticated` (migration `0014_permissoes.sql`).
-   Só ~15 funções RPC recebem `EXECUTE`, e um punhado de views em
-   `public` recebe `SELECT`. Uma vendedora chamando a API REST direto em
-   `/rest/v1/venda_itens` ou `/rest/v1/variacoes` recebe 401/403, mesmo
-   sabendo o nome da tabela.
+1. A API se conecta ao Postgres com **um único role**, `kiarys_app`
+   (criado em `0014_permissoes.sql`) — não existe um role por papel de
+   usuária no Postgres. Quem diferencia admin/gerente/vendedora é RLS
+   lendo `kiarys.uid()`, não o role de conexão.
+2. Mesmo a API sendo código confiável (não é o navegador), as tabelas de
+   `kiarys` têm RLS ligado sem nenhuma policy de escrita, e os `GRANT`
+   padrão são revogados de `kiarys_app` — só ~18 RPCs recebem `EXECUTE` e
+   um punhado de views em `public` recebe `SELECT`. Isso é defesa em
+   profundidade (brief, seção 2): um bug de rota na API que esqueça um
+   `WHERE vendedora_id = ...` ainda esbarra em RLS; um SELECT solto numa
+   rota genérica ainda esbarra no `GRANT` que falta.
 
-Ver o comentário no topo de `supabase/migrations/0001_base.sql` e de
+Ver o comentário no topo de `db/migrations/0001_base.sql` e de
 `0014_permissoes.sql` para o raciocínio completo.
 
-## Deploy
+## Deploy (Railway)
 
-### 1. Supabase
+### 1. Banco (Postgres)
 
-1. Crie um projeto novo em [supabase.com](https://supabase.com) (plano Free).
-2. `supabase link --project-ref <ref>`
-3. `supabase db push` — aplica as migrations em `supabase/migrations/`.
-4. Em **Settings > API > Exposed schemas**, adicione `kiarys` (além de
-   `public`, que já vem por padrão).
-5. Em **Authentication > Providers**, deixe só e-mail/senha. Em
-   **Authentication > Settings**, desligue "Enable email signup" público
-   — o cadastro de vendedora é sempre pelo admin (ver abaixo).
-6. Copie a **URL do projeto** e a **anon key** (Settings > API) para o
-   `.env` do frontend (`web/.env`, a partir de `web/.env.example`).
+1. No projeto do Railway, **New > Database > Postgres** — cria o serviço
+   e já expõe uma `DATABASE_URL` interna.
+2. Aplique as migrations: `DATABASE_URL=<a do serviço Postgres> npm run
+   db:migrate` (local, apontando pra connection string pública do
+   Postgres — Railway mostra em **Connect**).
+3. **Troque a senha do role `kiarys_app`** (a migration cria com um
+   placeholder): `psql "$DATABASE_URL" -c "alter role kiarys_app
+   password '<senha forte>'"`. Guarde essa senha — é a que a API vai usar.
 
-O plano Free do Supabase **pausa o projeto após ~7 dias sem uso**. Numa
-loja que vende todo dia isso não deve acontecer, mas se pausar: abra o
-projeto no painel do Supabase e clique em "Restore" — não há perda de
-dado, só o tempo do restore (minutos).
+### 2. API (`api/`)
 
-### 2. Frontend (Cloudflare Pages)
+Serviço Node novo no Railway, root directory `api/`. Variáveis de
+ambiente:
 
-1. Conecte o repositório no Cloudflare Pages.
-2. Build command: `npm run build` · diretório de saída: `web/dist` ·
-   diretório raiz do projeto: `web`.
-3. Variáveis de ambiente do build: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
-4. Domínio: em **Custom domains** do projeto no Cloudflare Pages, adicione
-   o subdomínio escolhido (ex. `erp.kiarabijous.com.br`) e crie o CNAME
-   correspondente no DNS do GoDaddy, apontando para o host que o
-   Cloudflare Pages indicar. Isso não depende do Railway nem entra na
-   fila de domínios de lá (ver "Domínio" abaixo).
+| Variável | Valor |
+|---|---|
+| `DATABASE_URL` | `postgresql://kiarys_app:<senha do passo 1>@<host interno do Postgres>/<db>` — use o host **interno** do Railway (`*.railway.internal`), não o público, já que API e banco estão no mesmo projeto |
+| `JWT_SECRET` | uma string aleatória longa (`openssl rand -base64 48`) — nunca reaproveitar de outro serviço |
+| `PORT` | Railway seta sozinho |
 
-### 3. Primeiro admin
+### 3. Frontend (`web/`)
 
-Não existe autocadastro público (`enable_signup = false`). Para criar o
-primeiro admin:
+Serviço estático (ou Static Site do Railway) apontando pra `web/`, build
+`npm run build`, saída `web/dist`. Variável de ambiente do build:
+`VITE_API_URL` (a URL pública do serviço da API).
 
-1. No painel do Supabase, **Authentication > Users > Add user** — crie
-   com e-mail e senha. O trigger `on_auth_user_created` já cria um perfil
-   em `kiarys.perfis`, mas **inativo** e com papel `vendedora`.
-2. No **SQL Editor** do Supabase, rode:
-   ```sql
-   update kiarys.perfis set ativo = true, papel = 'admin'
-   where id = (select id from auth.users where email = 'SEU_EMAIL_AQUI');
-   ```
-3. A partir daí, o próprio admin ativa e configura as demais contas pelo
-   painel — sem precisar mais do SQL Editor.
+### 4. Domínio
 
-### 4. Backup
+Em **Settings > Networking > Custom Domain** do serviço da API (ou do
+frontend, dependendo de qual serve a página — decidir na hora), adicione
+o subdomínio escolhido (ex. `erp.kiarabijous.com.br`). O Railway devolve
+um CNAME pra criar no DNS do GoDaddy. Com o plano Pro isso não esbarra
+mais no limite de 2 domínios por serviço que travava a P46 do
+`kiara-catalogo` (esse outro domínio segue como pendência separada, sem
+relação com este projeto).
 
-`scripts/backup.sh` faz `pg_dump` do schema `kiarys` para um `.sql.gz`.
-O workflow `.github/workflows/backup.yml` roda isso toda segunda e sobe o
-arquivo como artifact do Actions (retenção de 90 dias) — configure o
-secret `SUPABASE_DB_URL` do repositório (Settings > Database > Connection
-string, modo "Session", em Settings do projeto Supabase). Pode rodar
-manual também: `SUPABASE_DB_URL=... bash scripts/backup.sh`.
+### 5. Primeiro admin
+
+Não existe rota pública de cadastro — `criar_usuaria` exige
+`kiarys.eh_admin()`. Para criar o primeiro admin, direto no banco:
+
+```sql
+select kiarys.criar_usuaria(
+  'Seu Nome', 'seu@email.com', 'uma senha forte',
+  'admin'::kiarys.papel
+);
+```
+
+Só dá pra rodar isso conectando como o **dono do banco** (não como
+`kiarys_app`, que não tem `EXECUTE` liberado fora de sessão — e
+`criar_usuaria` exige `eh_admin()`, que exige sessão). Rode via `psql
+"$DATABASE_URL_DO_DONO"` com esse SQL direto (bypassa a checagem porque
+roda como superuser, não via RPC autenticada) **ou**, mais simples: rode
+o `INSERT` manual uma vez:
+
+```sql
+insert into kiarys.perfis (nome, email, senha_hash, papel)
+values ('Seu Nome', 'seu@email.com', crypt('uma senha forte', gen_salt('bf')), 'admin');
+```
+
+A partir daí, faça login normalmente e crie as demais contas pela tela
+de admin (que chama `criar_usuaria` via API, já autenticado como admin).
+
+### 6. Backup
+
+`scripts/backup.sh` faz `pg_dump` do schema `kiarys` (inclui
+`perfis.senha_hash` — é hash, mas trate o dump como sensível mesmo
+assim) pra um `.sql.gz`. `.github/workflows/backup.yml` roda isso toda
+segunda e sobe como artifact do Actions (retenção de 90 dias) —
+configure o secret `DATABASE_URL` do repositório (a connection string
+pública do Postgres, Railway > serviço > Connect). Rodar manual:
+`DATABASE_URL=... bash scripts/backup.sh`.
 
 ## Domínio
 
-`kiarabijous.com.br` é o domínio antigo da Alyra Joias (ex-Kiara Bijous),
-hoje sem uso oficial — está no GoDaddy, e o pendência de redirecioná-lo
-pro domínio novo da Alyra está travada por outro motivo (vaga de domínio
-no Railway do outro repositório) sem relação com este projeto. Usar um
-**subdomínio** dele para a Kiarys ERP (ex. `erp.kiarabijous.com.br`) não
-depende do Railway nem interfere nesse redirecionamento — é só um CNAME
-novo apontando pro Cloudflare Pages.
+`kiarabijous.com.br` é o domínio antigo da Alyra Joias (ex-Kiara
+Bijous), hoje sem uso oficial — está no GoDaddy. A pendência de
+redirecioná-lo pro domínio novo da Alyra (`kiara-catalogo`, P46) é outro
+assunto, travada por outro motivo, sem relação com este projeto. Usar um
+**subdomínio** dele pra Kiarys ERP (ex. `erp.kiarabijous.com.br`) é só
+um Custom Domain novo no Railway + um CNAME no GoDaddy.
 
 ## Desenvolvimento local
 
+Precisa de um Postgres rodando local (`postgres:16` via Docker, ou
+instalado direto) e Node 20+.
+
 ```bash
-supabase start          # sobe Postgres + Auth + Studio locais
-supabase db reset        # aplica migrations + supabase/seed.sql
+npm install                                    # dependências da raiz (scripts/migrate.js)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/kiarys \
+  npm run db:migrate:seed                       # migrations + db/seed.sql
+
+cd api && npm install && npm run dev            # quando o serviço existir
 cd web && npm install && npm run dev
 ```
 
-`supabase/seed.sql` cria 3 usuárias de teste (`admin@kiarys.dev`,
+`db/seed.sql` cria 3 usuárias de teste (`admin@kiarys.dev`,
 `gerente@kiarys.dev`, `vendedora@kiarys.dev`, senha `teste123`), um
 catálogo de exemplo (5 produtos × 4 tamanhos × 2 cores) e um caixa aberto.
 
 ### Testes
 
 ```bash
-supabase test db                          # pgTAP: permissões, ledger, venda, caixa, entrada, fuso
-cd tests/concorrencia && npm install && npm test   # 2 conexões reais, última peça
+bash scripts/test-db.sh                            # pgTAP: permissões, ledger, venda, caixa, entrada, fuso
+                                                     # (precisa da extensão pgtap instalada no Postgres)
+cd tests/concorrencia && npm install && npm test    # 2 conexões reais, última peça
 ```
 
 ## Decisões que ajustam o brief
@@ -124,8 +172,27 @@ cd tests/concorrencia && npm install && npm test   # 2 conexões reais, última 
 Registradas aqui porque mudam o comportamento do sistema em relação ao
 que o brief original descrevia — para não se perderem numa conversa.
 
-- **Caixa único da loja, não um caixa por vendedora.** A gaveta é física e
-  compartilhada; um fechamento "às cegas" por pessoa não faria sentido
+- **Railway em vez de Supabase/Cloudflare Pages.** O brief original
+  marcava "FIXO — nada de Railway" por causa de custo. Isso mudou: o
+  Railway Pro já é usado e pago pelo resto do GVA, então custo deixou de
+  ser argumento — usar o que já se conhece e já se paga. Isso trocou:
+  banco (Postgres do Railway em vez de Supabase), autenticação (API
+  Node própria com JWT em vez de Supabase Auth) e frontend/domínio
+  (Railway em vez de Cloudflare Pages). O **desenho de permissão
+  continua o mesmo** (RLS + `SECURITY DEFINER` + role único de baixo
+  privilégio) — só quem seta a identidade da sessão mudou de PostgREST
+  pra um middleware Express.
+- **API Node própria em vez de auto-hospedar o Supabase.** A alternativa
+  óbvia seria subir os containers do próprio Supabase (Postgres + Auth +
+  PostgREST) no Railway, preservando 100% do desenho original. Preferi
+  uma API Express fina: menos serviços Docker pra manter, mesma stack
+  que o resto do GVA já opera, e o desenho de segurança em RLS não muda
+  — só o mecanismo que valida o JWT e seta `app.uid` por requisição.
+- **`perfis` virou também a tabela de identidade** (`email` +
+  `senha_hash`), sem uma tabela `auth.users` separada — não tem mais
+  sentido separado sem um serviço de Auth dedicado.
+- **Caixa único da loja, não um caixa por vendedora.** A gaveta é física
+  e compartilhada; um fechamento "às cegas" por pessoa não faria sentido
   com uma gaveta só. `caixas` não tem `vendedora_id`: tem
   `usuario_abertura`/`usuario_fechamento` (quem mexeu na gaveta), e cada
   `vendas.vendedora_id` registra quem vendeu cada peça — a comissão e o
@@ -136,29 +203,26 @@ que o brief original descrevia — para não se perderem numa conversa.
 - **Estorno em dinheiro sai do caixa aberto de quem cancelou.** Se a
   venda cancelada tinha pagamento em dinheiro e não há caixa aberto no
   momento, `cancelar_venda` recusa (pede pra abrir o caixa antes) — o
-  dinheiro devolvido physicamente só existe se há uma gaveta aberta pra
+  dinheiro devolvido fisicamente só existe se há uma gaveta aberta pra
   tirar dele.
-- **Cloudflare Pages em vez da Vercel.** O plano Hobby da Vercel proíbe
-  uso comercial; uma loja é uso comercial. Cloudflare Pages Free permite
-  e não limita banda.
 - **Cadastro de usuária sempre pelo admin**, nunca autocadastro público —
-  ver "Primeiro admin" acima. Evita que qualquer e-mail vire conta com
-  acesso, já que não há backend próprio para intermediar isso com mais
-  cuidado (Edge Function fica como opção futura, se incomodar o fluxo
-  manual pelo painel do Supabase).
+  não existe rota pra isso na API; `criar_usuaria` exige `eh_admin()`.
 
 ## Estrutura do repositório
 
 ```
-supabase/
+db/
   migrations/      0001–0014, nesta ordem (ver cabeçalho de cada arquivo)
-  tests/           pgTAP — roda com `supabase test db`
+  tests/           pgTAP — roda com scripts/test-db.sh
   seed.sql         dado de desenvolvimento
+scripts/
+  migrate.js       runner de migrations (idempotente, via public.schema_migrations)
+  test-db.sh       roda os testes pgTAP contra um Postgres descartável
+  backup.sh        pg_dump do schema kiarys
 tests/concorrencia/ script Node com 2 conexões reais (não cabe em pgTAP)
-web/               frontend (Vite + React + TS) — ainda não iniciado,
-                   aguardando aprovação das migrations
-scripts/backup.sh
-.github/workflows/ ci.yml (migrations + concorrência + build do web),
+api/               API Node/Express — ainda não iniciada
+web/               frontend (Vite + React + TS) — ainda não iniciado
+.github/workflows/ ci.yml (migrations + pgTAP + concorrência + build web/api),
                    backup.yml (dump semanal)
 ```
 
@@ -166,8 +230,8 @@ scripts/backup.sh
 
 | # | Arquivo | O que cria |
 |---|---|---|
-| 0001 | `base.sql` | Schema, extensões, tipos, funções de apoio (`perfil_atual`, `eh_admin`, `pode_ver_custo`, `dia_local`) |
-| 0002 | `perfis_config.sql` | `perfis` (+ trigger em `auth.users`), `configuracoes`, `taxas_pagamento` |
+| 0001 | `base.sql` | Schema, extensões, tipos, funções de apoio (`dia_local`, `kiarys.uid()`) |
+| 0002 | `perfis_config.sql` | `perfis` (identidade + perfil de negócio), `configuracoes`, `taxas_pagamento`, `perfil_atual`/`eh_admin`/`pode_ver_custo`/`pode_cadastrar`, e as RPCs `autenticar`/`criar_usuaria`/`trocar_senha` |
 | 0003 | `catalogo.sql` | `categorias`, `colecoes`, `fornecedores`, `produtos`, `variacoes`, `preco_efetivo()` |
 | 0004 | `estoque.sql` | `movimentos_estoque` (insert-only) + `estoque_saldos` (cache por trigger) |
 | 0005 | `entradas.sql` | `entradas`, `entrada_itens` |
@@ -179,7 +243,7 @@ scripts/backup.sh
 | 0011 | `rpc_venda.sql` | `registrar_venda`, `cancelar_venda` |
 | 0012 | `rpc_estoque.sql` | `criar_produto_com_grade`, `importar_produtos`, `registrar_entrada`, `ajustar_estoque`, `alterar_precos` |
 | 0013 | `api_views.sql` | Views de leitura em `public` |
-| 0014 | `permissoes.sql` | RLS default-deny + `GRANT`/`REVOKE` + policies |
+| 0014 | `permissoes.sql` | Role `kiarys_app`, RLS default-deny + `GRANT`/`REVOKE` + policies |
 
 ## v2 / v3
 

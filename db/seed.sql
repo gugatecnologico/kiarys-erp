@@ -1,24 +1,19 @@
--- seed.sql — só para `supabase start` / `supabase db reset` local.
--- Roda como o dono do banco (bypassa RLS), então grava direto nas
--- tabelas em vez de passar pelas RPCs — mais simples e mais rápido para
--- popular dado de desenvolvimento.
+-- seed.sql — só para desenvolvimento local (`npm run db:seed`, ver
+-- scripts/migrate.js). Roda como o dono do banco (bypassa RLS), então
+-- grava direto nas tabelas em vez de passar pelas RPCs — mais simples e
+-- mais rápido para popular dado de desenvolvimento.
 
 set search_path = kiarys, public;
 
 -- ── 3 usuárias de teste ──────────────────────────────────────────────────
--- Senha para as três: "teste123" (só ambiente local).
-insert into auth.users (id, instance_id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, aud, role)
+-- Senha para as três: "teste123" (só ambiente local — nunca use essa
+-- senha em produção; o primeiro admin real é criado como no README).
+insert into kiarys.perfis (id, nome, email, senha_hash, papel, ativo, limite_desconto_pct, comissao_pct)
 values
-  ('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'admin@kiarys.dev', crypt('teste123', gen_salt('bf')), now(), '{"nome":"Admin Dev"}', 'authenticated', 'authenticated'),
-  ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000000', 'gerente@kiarys.dev', crypt('teste123', gen_salt('bf')), now(), '{"nome":"Gerente Dev"}', 'authenticated', 'authenticated'),
-  ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000000', 'vendedora@kiarys.dev', crypt('teste123', gen_salt('bf')), now(), '{"nome":"Vendedora Dev"}', 'authenticated', 'authenticated')
+  ('00000000-0000-0000-0000-000000000001', 'Admin Dev', 'admin@kiarys.dev', crypt('teste123', gen_salt('bf')), 'admin', true, null, 0),
+  ('00000000-0000-0000-0000-000000000002', 'Gerente Dev', 'gerente@kiarys.dev', crypt('teste123', gen_salt('bf')), 'gerente', true, 15, 0),
+  ('00000000-0000-0000-0000-000000000003', 'Vendedora Dev', 'vendedora@kiarys.dev', crypt('teste123', gen_salt('bf')), 'vendedora', true, 10, 3)
 on conflict (id) do nothing;
-
--- O trigger on_auth_user_created já criou os 3 perfis inativos. Ativa e
--- define papel + limites, pra ambiente de dev já sair usável.
-update kiarys.perfis set ativo = true, papel = 'admin' where id = '00000000-0000-0000-0000-000000000001';
-update kiarys.perfis set ativo = true, papel = 'gerente', limite_desconto_pct = 15 where id = '00000000-0000-0000-0000-000000000002';
-update kiarys.perfis set ativo = true, papel = 'vendedora', limite_desconto_pct = 10, comissao_pct = 3 where id = '00000000-0000-0000-0000-000000000003';
 
 -- ── Catálogo ─────────────────────────────────────────────────────────────
 insert into kiarys.categorias (nome) values ('Vestidos'), ('Blusas'), ('Calças'), ('Saias'), ('Acessórios');
@@ -68,7 +63,7 @@ insert into kiarys.clientes (nome, whatsapp, aceita_marketing)
 values ('Maria de Teste', '(88) 99999-1234', true);
 
 -- Caixa aberto de dev, para já poder testar venda na hora. Não dá pra
--- chamar a RPC abrir_caixa() aqui — ela exige auth.uid() (perfil_atual()),
+-- chamar a RPC abrir_caixa() aqui — ela exige kiarys.uid() (perfil_atual()),
 -- e o seed roda sem sessão — então insere direto, como a RPC faria.
 insert into kiarys.caixas (usuario_abertura, valor_inicial)
 values ('00000000-0000-0000-0000-000000000001', 200.00);

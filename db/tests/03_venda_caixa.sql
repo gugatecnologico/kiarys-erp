@@ -76,7 +76,7 @@ select is(
 -- `is`/`throws_ok`/etc. quando chamados via SELECT — dentro de um `perform`
 -- num bloco PL/pgSQL o resultado nunca chega ao TAP output).
 select is(
-  (select qtd from kiarys.estoque_saldos where variacao_id = 'bbbbbbbb-0000-0000-0000-000000000001'),
+  (select saldo from public.v_estoque where variacao_id = 'bbbbbbbb-0000-0000-0000-000000000001'),
   0,
   'saldo está zerado depois da venda (era 1 unidade)'
 );
@@ -91,7 +91,7 @@ select lives_ok(
 );
 
 select is(
-  (select qtd from kiarys.estoque_saldos where variacao_id = 'bbbbbbbb-0000-0000-0000-000000000001'),
+  (select saldo from public.v_estoque where variacao_id = 'bbbbbbbb-0000-0000-0000-000000000001'),
   1,
   'cancelar_venda devolve a peça ao estoque'
 );
@@ -124,7 +124,7 @@ select lives_ok(
   'fecha o caixa informando o valor contado'
 );
 select is(
-  (select diferenca from kiarys.caixas order by fechado_em desc limit 1),
+  (select diferenca from public.v_caixas order by fechado_em desc limit 1),
   -10.00,
   'diferença = contado (90) - esperado (100), calculada só depois do valor contado'
 );

@@ -6,15 +6,17 @@
 //
 // pgTAP roda tudo dentro de UMA transação — não simula duas conexões
 // concorrentes de verdade. Este script abre 2 conexões reais ao Postgres
-// local (via `supabase start`) e dispara as duas vendas da mesma peça
-// literalmente ao mesmo tempo (Promise.all), sem await entre elas.
+// (Railway ou local) e dispara as duas vendas da mesma peça literalmente
+// ao mesmo tempo (Promise.all), sem await entre elas.
 //
-// Uso: node tests/concorrencia/ultima-peca.test.mjs
-// Espera um `supabase start` rodando (porta 54322 por padrão).
+// Uso: DATABASE_URL=postgresql://... node tests/concorrencia/ultima-peca.test.mjs
+// Sem DATABASE_URL, assume um Postgres local em localhost:5432/postgres
+// com o role postgres sem senha (ambiente de dev).
+// Precisa rodar `npm run db:migrate` antes (o role kiarys_app tem que existir).
 
 import pg from 'pg';
 
-const DB_URL = process.env.SUPABASE_DB_URL ?? 'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
+const DB_URL = process.env.DATABASE_URL ?? 'postgresql://postgres@127.0.0.1:5432/postgres';
 
 const ADMIN_ID = '11111111-1111-1111-1111-111111111111';
 const VENDEDORA_A_ID = '33333333-3333-3333-3333-333333333333';
@@ -23,8 +25,10 @@ const VENDEDORA_B_ID = '44444444-4444-4444-4444-444444444444';
 async function conectarComo(usuarioId) {
   const client = new pg.Client(DB_URL);
   await client.connect();
-  await client.query(`select set_config('request.jwt.claims', $1, false)`, [JSON.stringify({ sub: usuarioId })]);
-  await client.query(`set role authenticated`);
+  // Mesma técnica que a API real usa por requisição — ver kiarys.uid()
+  // em db/migrations/0001_base.sql.
+  await client.query(`select set_config('app.uid', $1, false)`, [usuarioId]);
+  await client.query(`set role kiarys_app`);
   return client;
 }
 
@@ -32,12 +36,22 @@ async function main() {
   const admin = new pg.Client(DB_URL);
   await admin.connect();
 
-  console.log('→ preparando fixture: 1 variação com saldo = 1...');
+  console.log('→ preparando fixture: 3 perfis + 1 variação com saldo = 1...');
   await admin.query('begin');
-  // Fixture roda com o role de conexão (postgres/service_role — bypassa
-  // RLS), não como `authenticated`: o teste de concorrência é sobre a
-  // trava de estoque em registrar_venda, não sobre GRANT/RLS (isso já
-  // tem cobertura em supabase/tests/01_permissoes.sql).
+  // Fixture roda com o role de conexão (dono do banco — bypassa RLS),
+  // não como `kiarys_app`: o teste de concorrência é sobre a trava de
+  // estoque em registrar_venda, não sobre GRANT/RLS (isso já tem
+  // cobertura em db/tests/01_permissoes.sql).
+
+  await admin.query(
+    `insert into kiarys.perfis (id, nome, email, senha_hash, papel, ativo)
+     values
+       ($1, 'Admin Concorrência', 'admin-conc@teste.dev', crypt('x', gen_salt('bf')), 'admin', true),
+       ($2, 'Vendedora A', 'vendA-conc@teste.dev', crypt('x', gen_salt('bf')), 'vendedora', true),
+       ($3, 'Vendedora B', 'vendB-conc@teste.dev', crypt('x', gen_salt('bf')), 'vendedora', true)
+     on conflict (id) do nothing`,
+    [ADMIN_ID, VENDEDORA_A_ID, VENDEDORA_B_ID]
+  );
 
   const produto = await admin.query(
     `insert into kiarys.produtos (referencia, nome) values ('CONC-TEST-' || floor(random()*1000000), 'Produto Concorrência') returning id`

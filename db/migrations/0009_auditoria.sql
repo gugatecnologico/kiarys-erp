@@ -24,7 +24,8 @@ comment on table kiarys.auditoria is
   '(cancelar_venda, ajustar_estoque etc).';
 
 -- Tenta descobrir o usuário atual sem lançar exceção quando não há sessão
--- (o trigger de auth.users, por exemplo, roda sem JWT).
+-- (ex.: um UPDATE em variacoes rodado direto por um script de manutenção,
+-- sem app.uid setada — o trigger de auditoria não pode derrubar isso).
 create or replace function kiarys.usuario_atual_ou_null()
 returns uuid
 language plpgsql
@@ -33,7 +34,7 @@ security definer
 set search_path = kiarys, public
 as $$
 begin
-  return auth.uid();
+  return kiarys.uid();
 exception when others then
   return null;
 end;
