@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  banco:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Sobe o Supabase local
+        run: supabase start
+
+      - name: pgTAP — regras críticas (permissões, ledger, venda, caixa, entrada, fuso)
+        run: supabase test db
+
+      - name: Instala dependências do teste de concorrência
+        working-directory: tests/concorrencia
+        run: npm install
+
+      - name: Concorrência — duas vendedoras, última peça
+        working-directory: tests/concorrencia
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: npm test
+
+      - name: Para o Supabase local
+        if: always()
+        run: supabase stop
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Instala dependências
+        run: npm install --if-present
+      - name: Build
+        run: npm run build --if-present

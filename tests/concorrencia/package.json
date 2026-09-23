@@ -1,0 +1,11 @@
+{
+  "name": "kiarys-erp-testes-concorrencia",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node ultima-peca.test.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}

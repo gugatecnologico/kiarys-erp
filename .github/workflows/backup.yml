@@ -1,0 +1,22 @@
+name: Backup semanal
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # toda segunda, 06:00 UTC (03:00 America/Fortaleza)
+  workflow_dispatch: {}
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: pg_dump do Supabase
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: bash scripts/backup.sh
+      - name: Sobe o dump como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiarys-backup-${{ github.run_id }}
+          path: backup-*.sql.gz
+          retention-days: 90
