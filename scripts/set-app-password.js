@@ -12,8 +12,13 @@ if (!DATABASE_URL || !NEW_APP_PASSWORD) {
   process.exit(1);
 }
 
+// ALTER ROLE é DDL — não aceita parâmetro bind ($1) na cláusula PASSWORD,
+// só string literal. Escapa aspas simples manualmente (dobrar) em vez de
+// interpolar direto.
+const senhaEscapada = NEW_APP_PASSWORD.replace(/'/g, "''");
+
 const client = new pg.Client({ connectionString: DATABASE_URL });
 await client.connect();
-await client.query('alter role kiarys_app password $1', [NEW_APP_PASSWORD]);
+await client.query(`alter role kiarys_app password '${senhaEscapada}'`);
 await client.end();
 console.log('✓ senha do kiarys_app trocada');
