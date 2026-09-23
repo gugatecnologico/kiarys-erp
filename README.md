@@ -57,14 +57,19 @@ Ver o comentário no topo de `db/migrations/0001_base.sql` e de
 
 ## Status
 
-Banco e API já estão no ar no Railway (projeto `kiarys-erp`, mesmo
-workspace do resto do GVA): Postgres migrado (14 migrations), API
-respondendo em `https://api-production-16a21.up.railway.app` (URL
-provisória do Railway — troca pra `erp.kiarabijous.com.br` quando o
-domínio for configurado, ver "Domínio"). Primeiro admin criado
-(`gugabezerra20@gmail.com`) — **trocar a senha temporária assim que
-logar**, via `POST /auth/trocar-senha`. Frontend (`web/`) ainda não
-existe.
+Banco, API e frontend já estão no ar no Railway (projeto `kiarys-erp`,
+mesmo workspace do resto do GVA):
+
+- **App (o que o time acessa):** `https://kiarys.kiarabijous.com.br`
+  (também em `https://web-production-bb551.up.railway.app`, a URL fixa
+  do Railway, caso o domínio ainda esteja propagando).
+- **API:** `https://api-production-16a21.up.railway.app` — não é pra
+  navegador acessar direto, é o que o frontend chama.
+- **Banco:** Postgres migrado, 14 migrations aplicadas.
+
+Primeiro admin criado (`gugabezerra20@gmail.com`) — **trocar a senha
+temporária assim que logar**, via `POST /auth/trocar-senha` (ainda sem
+tela pra isso).
 
 ## Deploy (Railway)
 
@@ -97,19 +102,33 @@ resolve isso sem ambiguidade. Variáveis de ambiente:
 
 ### 3. Frontend (`web/`)
 
-Serviço estático (ou Static Site do Railway) apontando pra `web/`, build
-`npm run build`, saída `web/dist`. Variável de ambiente do build:
-`VITE_API_URL` (a URL pública do serviço da API).
+Serviço Node no Railway, root directory `web/`, builder **Dockerfile**
+(`web/Dockerfile`) — build multi-stage: `npm run build` do Vite, depois
+nginx servindo o estático com fallback de SPA (`web/nginx.conf`).
+
+- Build ARG (não variável de runtime — Vite embute em tempo de build):
+  `VITE_API_URL` = a URL pública do serviço da API.
+- **`targetPort` do domínio precisa ser setado pra `80` manualmente**
+  (`update-domain` no Railway, ou a UI). Sem isso o domínio fica
+  respondendo 502 mesmo com o container rodando — o nginx escuta na 80,
+  mas o Railway não infere isso sozinho de um `EXPOSE 80` em Dockerfile
+  multi-stage.
 
 ### 4. Domínio
 
-Em **Settings > Networking > Custom Domain** do serviço da API (ou do
-frontend, dependendo de qual serve a página — decidir na hora), adicione
-o subdomínio escolhido (ex. `erp.kiarabijous.com.br`). O Railway devolve
-um CNAME pra criar no DNS do GoDaddy. Com o plano Pro isso não esbarra
-mais no limite de 2 domínios por serviço que travava a P46 do
+O domínio do **frontend** é o que o time acessa (`kiarys.kiarabijous.com.br`
+neste projeto) — a API fica só na URL interna/gerada do Railway, o
+navegador nunca precisa saber o nome dela. Em **Settings > Networking >
+Custom Domain** do serviço `web`, adicione o subdomínio. O Railway
+devolve um CNAME pra criar no DNS do GoDaddy. Com o plano Pro isso não
+esbarra no limite de 2 domínios por serviço que travava a P46 do
 `kiara-catalogo` (esse outro domínio segue como pendência separada, sem
 relação com este projeto).
+
+Lembre de atualizar `CORS_ORIGIN` na API (lista separada por vírgula)
+com a URL final do frontend — sem isso o navegador bloqueia toda
+chamada por CORS, em silêncio (foi um dos dois bugs achados testando
+isso num navegador de verdade, não só com curl).
 
 ### 5. Primeiro admin
 
