@@ -55,6 +55,17 @@ negócio (papel, comissão, limite de desconto). O fluxo:
 Ver o comentário no topo de `db/migrations/0001_base.sql` e de
 `0014_permissoes.sql` para o raciocínio completo.
 
+## Status
+
+Banco e API já estão no ar no Railway (projeto `kiarys-erp`, mesmo
+workspace do resto do GVA): Postgres migrado (14 migrations), API
+respondendo em `https://api-production-16a21.up.railway.app` (URL
+provisória do Railway — troca pra `erp.kiarabijous.com.br` quando o
+domínio for configurado, ver "Domínio"). Primeiro admin criado
+(`gugabezerra20@gmail.com`) — **trocar a senha temporária assim que
+logar**, via `POST /auth/trocar-senha`. Frontend (`web/`) ainda não
+existe.
+
 ## Deploy (Railway)
 
 ### 1. Banco (Postgres)
@@ -70,8 +81,13 @@ Ver o comentário no topo de `db/migrations/0001_base.sql` e de
 
 ### 2. API (`api/`)
 
-Serviço Node novo no Railway, root directory `api/`. Variáveis de
-ambiente:
+Serviço Node novo no Railway, root directory `api/`, builder
+**Dockerfile** (`api/Dockerfile`) — não Railpack/Nixpacks. O repo tem 3
+`package.json` irmãos (raiz, `api/`, `tests/concorrencia/`) sem
+`workspaces` declarado, e a detecção automática de monorepo do Railpack
+escolheu o pacote errado (instalou as dependências de
+`tests/concorrencia` — só `pg` — em vez das da API). Dockerfile explícito
+resolve isso sem ambiguidade. Variáveis de ambiente:
 
 | Variável | Valor |
 |---|---|
