@@ -9,11 +9,16 @@ import { usuariasRouter } from './routes/usuarias.js';
 
 const app = express();
 
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN?.split(',') ?? '*',
-  })
-);
+// CORS_ORIGIN="*" precisa virar a STRING '*' (curinga de verdade pra lib
+// `cors`), não um array ['*'] — .split(',') numa string "*" devolve
+// ['*'], e a lib trata array como allowlist de valores exatos, nunca
+// batendo com nenhuma origem real. Foi assim que o preview local (porta
+// diferente da API) ficou bloqueado em silêncio até eu testar de verdade
+// num navegador — curl nunca manda Origin, então nunca pega esse bug.
+const corsOrigin =
+  !process.env.CORS_ORIGIN || process.env.CORS_ORIGIN === '*' ? '*' : process.env.CORS_ORIGIN.split(',');
+
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
