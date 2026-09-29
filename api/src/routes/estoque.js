@@ -17,13 +17,14 @@ estoqueRouter.post('/produtos', async (req, res) => {
     tamanhos,
     cores,
     foto_url = null,
+    custo_medio = null,
   } = req.body ?? {};
 
   try {
     const produto = await comoUsuario(req.uid, async (client) => {
       const { rows } = await client.query(
-        `select * from kiarys.criar_produto_com_grade($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [referencia, nome, categoria_id, colecao_id, fornecedor_id, preco_venda, tamanhos, cores, foto_url]
+        `select * from kiarys.criar_produto_com_grade($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [referencia, nome, categoria_id, colecao_id, fornecedor_id, preco_venda, tamanhos, cores, foto_url, custo_medio]
       );
       return rows[0];
     });

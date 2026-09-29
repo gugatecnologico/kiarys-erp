@@ -1,7 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { api, ApiError, type Categoria, type Colecao, type Fornecedor } from '../../lib/api';
+import { comprimirImagem } from '../../lib/imagem';
+import { useAuth } from '../../context/AuthContext';
 
 export function AdminProdutos() {
+  const { perfil } = useAuth();
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [colecoes, setColecoes] = useState<Colecao[]>([]);
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
@@ -12,9 +15,11 @@ export function AdminProdutos() {
   const [colecaoId, setColecaoId] = useState('');
   const [fornecedorId, setFornecedorId] = useState('');
   const [precoVenda, setPrecoVenda] = useState('');
+  const [custoMedio, setCustoMedio] = useState('');
   const [tamanhos, setTamanhos] = useState('');
   const [cores, setCores] = useState('');
   const [fotoUrl, setFotoUrl] = useState('');
+  const [processandoFoto, setProcessandoFoto] = useState(false);
 
   const [novaCategoria, setNovaCategoria] = useState('');
   const [novaColecao, setNovaColecao] = useState('');
@@ -70,6 +75,21 @@ export function AdminProdutos() {
     }
   }
 
+  async function escolherFoto(e: ChangeEvent<HTMLInputElement>) {
+    const arquivo = e.target.files?.[0];
+    if (!arquivo) return;
+    setErro(null);
+    setProcessandoFoto(true);
+    try {
+      setFotoUrl(await comprimirImagem(arquivo));
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : 'não deu pra processar a foto');
+    } finally {
+      setProcessandoFoto(false);
+      e.target.value = '';
+    }
+  }
+
   async function salvar(e: FormEvent) {
     e.preventDefault();
     setErro(null);
@@ -91,12 +111,14 @@ export function AdminProdutos() {
         preco_venda: Number(precoVenda),
         tamanhos: listaTamanhos,
         cores: listaCores,
-        foto_url: fotoUrl.trim() || null,
+        foto_url: fotoUrl || null,
+        custo_medio: perfil?.pode_ver_custo && custoMedio ? Number(custoMedio) : null,
       });
       setOk(`Produto "${nome}" cadastrado com ${listaTamanhos.length * listaCores.length} variações.`);
       setReferencia('');
       setNome('');
       setPrecoVenda('');
+      setCustoMedio('');
       setTamanhos('');
       setCores('');
       setFotoUrl('');
@@ -133,6 +155,25 @@ export function AdminProdutos() {
               />
             </div>
           </div>
+
+          {perfil?.pode_ver_custo && (
+            <div className="field">
+              <label htmlFor="custoMedio">Custo (opcional — só você vê)</label>
+              <input
+                id="custoMedio"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                value={custoMedio}
+                onChange={(e) => setCustoMedio(e.target.value)}
+              />
+              <p className="muted" style={{ marginTop: 6, marginBottom: 0 }}>
+                É só uma referência até a primeira entrada de mercadoria — a partir daí o custo real vira
+                o custo médio ponderado, calculado automaticamente.
+              </p>
+            </div>
+          )}
 
           <div className="field">
             <label htmlFor="nome">Nome</label>
@@ -218,8 +259,26 @@ export function AdminProdutos() {
           </p>
 
           <div className="field">
-            <label htmlFor="fotoUrl">Foto (URL, opcional)</label>
-            <input id="fotoUrl" value={fotoUrl} onChange={(e) => setFotoUrl(e.target.value)} />
+            <label htmlFor="foto">Foto (pra identificação interna, opcional)</label>
+            <input id="foto" type="file" accept="image/*" capture="environment" onChange={escolherFoto} />
+            {processandoFoto && <p className="muted">processando foto…</p>}
+            {fotoUrl && !processandoFoto && (
+              <div style={{ marginTop: 10 }}>
+                <img
+                  src={fotoUrl}
+                  alt="prévia da foto do produto"
+                  style={{ maxWidth: 160, borderRadius: 10, border: '1px solid var(--border)', display: 'block' }}
+                />
+                <button
+                  type="button"
+                  className="btn secondary small"
+                  style={{ marginTop: 8 }}
+                  onClick={() => setFotoUrl('')}
+                >
+                  remover foto
+                </button>
+              </div>
+            )}
           </div>
 
           <button className="btn" type="submit" disabled={salvando}>

@@ -196,6 +196,7 @@ export const api = {
     tamanhos: string[];
     cores: string[];
     foto_url?: string | null;
+    custo_medio?: number | null;
   }) => request('/api/estoque/produtos', { method: 'POST', body: JSON.stringify(payload) }),
 
   importarProdutos: (linhas: LinhaImportacao[]) =>
