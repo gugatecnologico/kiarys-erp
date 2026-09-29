@@ -83,6 +83,7 @@ export type ProdutoBusca = {
   preco_min: string;
   preco_max: string;
   saldo_total: number;
+  categoria_id: string | null;
 };
 
 export type CaixaAberto = {
@@ -147,8 +148,8 @@ export const api = {
   trocarSenha: (senha_atual: string, senha_nova: string) =>
     request<void>('/auth/trocar-senha', { method: 'POST', body: JSON.stringify({ senha_atual, senha_nova }) }),
 
-  buscarProdutos: (q: string) =>
-    request<ProdutoBusca[]>(`/api/views/v_produtos_busca?${new URLSearchParams({ q, limit: '20' })}`),
+  buscarProdutos: (q: string, limit = 60) =>
+    request<ProdutoBusca[]>(`/api/views/v_produtos_busca?${new URLSearchParams({ q, limit: String(limit) })}`),
   gradeDoProduto: (referencia: string) =>
     request<VariacaoEstoque[]>(`/api/views/v_estoque?${new URLSearchParams({ q: referencia, limit: '100' })}`),
   caixaAberto: () => request<CaixaAberto[]>('/api/views/v_caixa_aberto'),

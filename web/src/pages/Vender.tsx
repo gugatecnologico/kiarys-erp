@@ -1,25 +1,17 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { api, ApiError, type CaixaAberto, type Pagamento, type Venda, type VariacaoEstoque } from '../lib/api';
+import {
+  api,
+  ApiError,
+  type CaixaAberto,
+  type Categoria,
+  type Pagamento,
+  type ProdutoBusca,
+  type Venda,
+  type VariacaoEstoque,
+} from '../lib/api';
+import { Miniatura } from '../components/Miniatura';
 
 type ItemCarrinho = { variacao: VariacaoEstoque; quantidade: number };
-
-type ProdutoAgrupado = {
-  produto_id: string;
-  referencia: string;
-  nome: string;
-  foto_url: string | null;
-  variacoes: VariacaoEstoque[];
-};
-
-function agruparPorProduto(linhas: VariacaoEstoque[]): ProdutoAgrupado[] {
-  const mapa = new Map<string, ProdutoAgrupado>();
-  for (const v of linhas) {
-    const atual = mapa.get(v.produto_id);
-    if (atual) atual.variacoes.push(v);
-    else mapa.set(v.produto_id, { produto_id: v.produto_id, referencia: v.referencia, nome: v.nome, foto_url: v.foto_url, variacoes: [v] });
-  }
-  return [...mapa.values()];
-}
 
 const moeda = (v: number | string) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -28,11 +20,17 @@ export function Vender() {
   const [valorInicial, setValorInicial] = useState('');
   const [erroCaixa, setErroCaixa] = useState<string | null>(null);
 
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [categoriaFiltro, setCategoriaFiltro] = useState<string | null>(null);
+
   const [busca, setBusca] = useState('');
-  const [resultados, setResultados] = useState<ProdutoAgrupado[] | null>(null);
-  const [produtoAberto, setProdutoAberto] = useState<string | null>(null);
+  const [produtos, setProdutos] = useState<ProdutoBusca[] | null>(null);
   const [buscando, setBuscando] = useState(false);
   const [erroBusca, setErroBusca] = useState<string | null>(null);
+
+  const [produtoAberto, setProdutoAberto] = useState<string | null>(null);
+  const [gradePorProduto, setGradePorProduto] = useState<Record<string, VariacaoEstoque[]>>({});
+  const [carregandoGrade, setCarregandoGrade] = useState<string | null>(null);
 
   const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([]);
   const [descontoGeral, setDescontoGeral] = useState('0');
@@ -44,6 +42,8 @@ export function Vender() {
 
   useEffect(() => {
     carregarCaixa();
+    carregarProdutos('');
+    api.categorias().then(setCategorias).catch(() => {});
   }, []);
 
   function carregarCaixa() {
@@ -51,6 +51,18 @@ export function Vender() {
       .caixaAberto()
       .then((rows) => setCaixa(rows[0] ?? null))
       .catch(() => setCaixa(null));
+  }
+
+  async function carregarProdutos(termo: string) {
+    setBuscando(true);
+    setErroBusca(null);
+    try {
+      setProdutos(await api.buscarProdutos(termo));
+    } catch (err) {
+      setErroBusca(err instanceof ApiError ? err.message : 'busca falhou');
+    } finally {
+      setBuscando(false);
+    }
   }
 
   async function abrirCaixa(e: FormEvent) {
@@ -64,20 +76,26 @@ export function Vender() {
     }
   }
 
-  async function buscar(e: FormEvent) {
+  function buscar(e: FormEvent) {
     e.preventDefault();
-    if (busca.trim().length < 2) return;
-    setBuscando(true);
-    setErroBusca(null);
+    carregarProdutos(busca.trim());
+  }
+
+  async function toggleProduto(p: ProdutoBusca) {
+    if (produtoAberto === p.produto_id) {
+      setProdutoAberto(null);
+      return;
+    }
+    setProdutoAberto(p.produto_id);
+    if (gradePorProduto[p.produto_id]) return;
+    setCarregandoGrade(p.produto_id);
     try {
-      const linhas = await api.estoque(busca.trim());
-      const agrupado = agruparPorProduto(linhas);
-      setResultados(agrupado);
-      setProdutoAberto(agrupado.length === 1 ? agrupado[0].produto_id : null);
-    } catch (err) {
-      setErroBusca(err instanceof ApiError ? err.message : 'busca falhou');
+      const grade = await api.gradeDoProduto(p.referencia);
+      setGradePorProduto((atual) => ({ ...atual, [p.produto_id]: grade }));
+    } catch {
+      // deixa a lista vazia — a vendedora tenta de novo fechando/abrindo
     } finally {
-      setBuscando(false);
+      setCarregandoGrade(null);
     }
   }
 
@@ -101,6 +119,15 @@ export function Vender() {
         .filter((i) => i.quantidade > 0)
     );
   }
+
+  function removerDoCarrinho(variacaoId: string) {
+    setCarrinho((atual) => atual.filter((i) => i.variacao.variacao_id !== variacaoId));
+  }
+
+  const produtosFiltrados = useMemo(
+    () => (categoriaFiltro ? (produtos ?? []).filter((p) => p.categoria_id === categoriaFiltro) : produtos ?? []),
+    [produtos, categoriaFiltro]
+  );
 
   const subtotal = useMemo(
     () => carrinho.reduce((soma, i) => soma + Number(i.variacao.preco_efetivo) * i.quantidade, 0),
@@ -156,7 +183,8 @@ export function Vender() {
     setErroVenda(null);
     setChaveIdempotencia(crypto.randomUUID());
     setBusca('');
-    setResultados(null);
+    setProdutoAberto(null);
+    carregarProdutos('');
   }
 
   if (caixa === undefined) {
@@ -219,26 +247,55 @@ export function Vender() {
           </button>
         </div>
         {erroBusca && <div className="alert error">{erroBusca}</div>}
+
+        {categorias.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 10, paddingBottom: 2 }}>
+            <button
+              type="button"
+              className={`badge ${categoriaFiltro === null ? 'ok' : ''}`}
+              style={{ border: 'none', cursor: 'pointer', flexShrink: 0, padding: '6px 12px' }}
+              onClick={() => setCategoriaFiltro(null)}
+            >
+              Todas
+            </button>
+            {categorias.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={`badge ${categoriaFiltro === c.id ? 'ok' : ''}`}
+                style={{ border: 'none', cursor: 'pointer', flexShrink: 0, padding: '6px 12px' }}
+                onClick={() => setCategoriaFiltro(categoriaFiltro === c.id ? null : c.id)}
+              >
+                {c.nome}
+              </button>
+            ))}
+          </div>
+        )}
       </form>
 
-      {resultados && resultados.length === 0 && <p className="muted">Nada encontrado.</p>}
+      {produtos && produtosFiltrados.length === 0 && <p className="muted">Nada encontrado.</p>}
 
-      {resultados?.map((p) => (
+      {produtosFiltrados.map((p) => (
         <div className="card" key={p.produto_id}>
-          <button
-            className="list-item"
-            onClick={() => setProdutoAberto(produtoAberto === p.produto_id ? null : p.produto_id)}
-          >
-            <span>
-              <strong>{p.nome}</strong>
-              <br />
-              <span className="muted">{p.referencia}</span>
+          <button className="list-item" onClick={() => toggleProduto(p)} style={{ gap: 10 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left' }}>
+              <Miniatura src={p.foto_url} alt={p.nome} />
+              <span>
+                <strong>{p.nome}</strong>
+                <br />
+                <span className="muted">
+                  {p.referencia} · {p.preco_min === p.preco_max ? moeda(p.preco_min) : `${moeda(p.preco_min)} – ${moeda(p.preco_max)}`}
+                </span>
+              </span>
             </span>
-            <span className="muted">{produtoAberto === p.produto_id ? '▲' : '▼'}</span>
+            <span className={`badge ${p.saldo_total <= 0 ? 'low' : 'ok'}`}>
+              {produtoAberto === p.produto_id ? '▲' : `${p.saldo_total} un. ▼`}
+            </span>
           </button>
           {produtoAberto === p.produto_id && (
             <div style={{ marginTop: 8 }}>
-              {p.variacoes.map((v) => (
+              {carregandoGrade === p.produto_id && <p className="muted">carregando…</p>}
+              {gradePorProduto[p.produto_id]?.map((v) => (
                 <button
                   key={v.variacao_id}
                   className="list-item"
@@ -266,15 +323,18 @@ export function Vender() {
         <div className="card">
           <h2>Carrinho</h2>
           {carrinho.map((i) => (
-            <div key={i.variacao.variacao_id} className="list-item">
-              <span>
-                {i.variacao.nome}
-                <br />
-                <span className="muted">
-                  {i.variacao.tamanho} · {i.variacao.cor} · {moeda(i.variacao.preco_efetivo)}
+            <div key={i.variacao.variacao_id} className="list-item" style={{ gap: 10 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Miniatura src={i.variacao.foto_url} alt={i.variacao.nome} tamanho={36} />
+                <span>
+                  {i.variacao.nome}
+                  <br />
+                  <span className="muted">
+                    {i.variacao.tamanho} · {i.variacao.cor} · {moeda(i.variacao.preco_efetivo)}
+                  </span>
                 </span>
               </span>
-              <span className="row" style={{ maxWidth: 120, alignItems: 'center' }}>
+              <span className="row" style={{ maxWidth: 150, alignItems: 'center' }}>
                 <button
                   className="btn secondary small"
                   type="button"
@@ -290,6 +350,14 @@ export function Vender() {
                   disabled={i.quantidade >= i.variacao.saldo}
                 >
                   +
+                </button>
+                <button
+                  className="btn secondary small"
+                  type="button"
+                  onClick={() => removerDoCarrinho(i.variacao.variacao_id)}
+                  aria-label="remover"
+                >
+                  ×
                 </button>
               </span>
             </div>

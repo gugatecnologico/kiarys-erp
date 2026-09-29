@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { api, ApiError, type VariacaoEstoque } from '../../lib/api';
+import { Miniatura } from '../../components/Miniatura';
 
 // Busca + lista de resultados clicáveis pra escolher UMA variação
 // (tamanho × cor de um produto) — reusado por Entrada, Ajuste e Preços.
@@ -48,13 +49,16 @@ export function VariacaoPicker({ onEscolher }: { onEscolher: (v: VariacaoEstoque
               key={v.variacao_id}
               className="list-item"
               onClick={() => onEscolher(v)}
-              style={{ cursor: 'pointer', background: 'none', border: 'none', font: 'inherit' }}
+              style={{ cursor: 'pointer', background: 'none', border: 'none', font: 'inherit', gap: 10 }}
             >
-              <span>
-                <strong>{v.nome}</strong>
-                <br />
-                <span className="muted">
-                  {v.referencia} · {v.tamanho} · {v.cor}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left' }}>
+                <Miniatura src={v.foto_url} alt={v.nome} tamanho={36} />
+                <span>
+                  <strong>{v.nome}</strong>
+                  <br />
+                  <span className="muted">
+                    {v.referencia} · {v.tamanho} · {v.cor}
+                  </span>
                 </span>
               </span>
               <span className={`badge ${v.saldo <= v.estoque_minimo ? 'low' : 'ok'}`}>{v.saldo} un.</span>
