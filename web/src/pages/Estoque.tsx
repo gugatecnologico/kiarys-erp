@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, type VariacaoEstoque } from '../lib/api';
 import { Miniatura } from '../components/Miniatura';
+
+const ScannerCodigoBarras = lazy(() =>
+  import('../components/ScannerCodigoBarras').then((m) => ({ default: m.ScannerCodigoBarras }))
+);
 
 const moeda = (v: number | string) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -10,10 +14,24 @@ export function Estoque() {
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [soBaixo, setSoBaixo] = useState(false);
+  const [scanAberto, setScanAberto] = useState(false);
 
   useEffect(() => {
     carregar('');
   }, []);
+
+  // busca ao digitar (com debounce), pulando a primeira renderização —
+  // o mount já carregou a lista inicial na hora.
+  const primeiraRenderBusca = useRef(true);
+  useEffect(() => {
+    if (primeiraRenderBusca.current) {
+      primeiraRenderBusca.current = false;
+      return;
+    }
+    const t = setTimeout(() => carregar(busca.trim()), 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busca]);
 
   async function carregar(termo: string) {
     setCarregando(true);
@@ -32,6 +50,12 @@ export function Estoque() {
     carregar(busca.trim());
   }
 
+  function codigoLido(codigo: string) {
+    setScanAberto(false);
+    setBusca(codigo);
+    carregar(codigo);
+  }
+
   const visiveis = useMemo(
     () => (soBaixo ? (linhas ?? []).filter((v) => v.saldo <= v.estoque_minimo) : linhas ?? []),
     [linhas, soBaixo]
@@ -47,11 +71,26 @@ export function Estoque() {
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
           />
+          <button
+            type="button"
+            className="btn secondary small"
+            style={{ flex: '0 0 auto' }}
+            onClick={() => setScanAberto(true)}
+            aria-label="escanear código de barras"
+          >
+            📷
+          </button>
           <button className="btn small" type="submit" disabled={carregando} style={{ flex: '0 0 auto' }}>
             {carregando ? '…' : 'Buscar'}
           </button>
         </div>
         {erro && <div className="alert error">{erro}</div>}
+
+        {scanAberto && (
+          <Suspense fallback={null}>
+            <ScannerCodigoBarras onLido={codigoLido} onFechar={() => setScanAberto(false)} />
+          </Suspense>
+        )}
 
         <button
           type="button"

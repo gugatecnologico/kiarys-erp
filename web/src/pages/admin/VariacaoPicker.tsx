@@ -1,6 +1,10 @@
-import { useState, type FormEvent } from 'react';
+import { lazy, Suspense, useState, type FormEvent } from 'react';
 import { api, ApiError, type VariacaoEstoque } from '../../lib/api';
 import { Miniatura } from '../../components/Miniatura';
+
+const ScannerCodigoBarras = lazy(() =>
+  import('../../components/ScannerCodigoBarras').then((m) => ({ default: m.ScannerCodigoBarras }))
+);
 
 // Busca + lista de resultados clicáveis pra escolher UMA variação
 // (tamanho × cor de um produto) — reusado por Entrada, Ajuste e Preços.
@@ -9,18 +13,29 @@ export function VariacaoPicker({ onEscolher }: { onEscolher: (v: VariacaoEstoque
   const [linhas, setLinhas] = useState<VariacaoEstoque[] | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [scanAberto, setScanAberto] = useState(false);
 
-  async function buscar(e: FormEvent) {
-    e.preventDefault();
+  async function buscarTermo(termo: string) {
     setCarregando(true);
     setErro(null);
     try {
-      setLinhas(await api.estoque(busca.trim()));
+      setLinhas(await api.estoque(termo));
     } catch (err) {
       setErro(err instanceof ApiError ? err.message : 'busca falhou');
     } finally {
       setCarregando(false);
     }
+  }
+
+  function buscar(e: FormEvent) {
+    e.preventDefault();
+    buscarTermo(busca.trim());
+  }
+
+  function codigoLido(codigo: string) {
+    setScanAberto(false);
+    setBusca(codigo);
+    buscarTermo(codigo);
   }
 
   return (
@@ -32,11 +47,25 @@ export function VariacaoPicker({ onEscolher }: { onEscolher: (v: VariacaoEstoque
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
           />
+          <button
+            type="button"
+            className="btn secondary small"
+            style={{ flex: '0 0 auto' }}
+            onClick={() => setScanAberto(true)}
+            aria-label="escanear código de barras"
+          >
+            📷
+          </button>
           <button className="btn small" type="submit" disabled={carregando} style={{ flex: '0 0 auto' }}>
             {carregando ? '…' : 'Buscar'}
           </button>
         </div>
         {erro && <div className="alert error">{erro}</div>}
+        {scanAberto && (
+          <Suspense fallback={null}>
+            <ScannerCodigoBarras onLido={codigoLido} onFechar={() => setScanAberto(false)} />
+          </Suspense>
+        )}
       </form>
 
       {linhas?.length === 0 && <p className="muted">Nada encontrado.</p>}

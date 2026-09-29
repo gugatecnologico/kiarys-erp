@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   api,
   ApiError,
@@ -10,6 +10,12 @@ import {
   type VariacaoEstoque,
 } from '../lib/api';
 import { Miniatura } from '../components/Miniatura';
+
+// lazy: a lib de leitura de código de barras é pesada (zxing) e só a
+// vendedora que aperta 📷 precisa baixá-la.
+const ScannerCodigoBarras = lazy(() =>
+  import('../components/ScannerCodigoBarras').then((m) => ({ default: m.ScannerCodigoBarras }))
+);
 
 type ItemCarrinho = { variacao: VariacaoEstoque; quantidade: number };
 
@@ -27,6 +33,7 @@ export function Vender() {
   const [produtos, setProdutos] = useState<ProdutoBusca[] | null>(null);
   const [buscando, setBuscando] = useState(false);
   const [erroBusca, setErroBusca] = useState<string | null>(null);
+  const [scanAberto, setScanAberto] = useState(false);
 
   const [produtoAberto, setProdutoAberto] = useState<string | null>(null);
   const [gradePorProduto, setGradePorProduto] = useState<Record<string, VariacaoEstoque[]>>({});
@@ -45,6 +52,20 @@ export function Vender() {
     carregarProdutos('');
     api.categorias().then(setCategorias).catch(() => {});
   }, []);
+
+  // busca ao digitar (com debounce) — o botão "Buscar" continua existindo
+  // pra quem prefere apertar, mas não é mais obrigatório. Pula a primeira
+  // renderização: o mount já carregou o catálogo inicial na hora.
+  const primeiraRenderBusca = useRef(true);
+  useEffect(() => {
+    if (primeiraRenderBusca.current) {
+      primeiraRenderBusca.current = false;
+      return;
+    }
+    const t = setTimeout(() => carregarProdutos(busca.trim()), 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busca]);
 
   function carregarCaixa() {
     api
@@ -79,6 +100,12 @@ export function Vender() {
   function buscar(e: FormEvent) {
     e.preventDefault();
     carregarProdutos(busca.trim());
+  }
+
+  function codigoLido(codigo: string) {
+    setScanAberto(false);
+    setBusca(codigo);
+    carregarProdutos(codigo);
   }
 
   async function toggleProduto(p: ProdutoBusca) {
@@ -242,11 +269,26 @@ export function Vender() {
             onChange={(e) => setBusca(e.target.value)}
             autoFocus
           />
+          <button
+            type="button"
+            className="btn secondary small"
+            style={{ flex: '0 0 auto' }}
+            onClick={() => setScanAberto(true)}
+            aria-label="escanear código de barras"
+          >
+            📷
+          </button>
           <button className="btn small" type="submit" disabled={buscando} style={{ flex: '0 0 auto' }}>
             {buscando ? '…' : 'Buscar'}
           </button>
         </div>
         {erroBusca && <div className="alert error">{erroBusca}</div>}
+
+        {scanAberto && (
+          <Suspense fallback={null}>
+            <ScannerCodigoBarras onLido={codigoLido} onFechar={() => setScanAberto(false)} />
+          </Suspense>
+        )}
 
         {categorias.length > 0 && (
           <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 10, paddingBottom: 2 }}>
